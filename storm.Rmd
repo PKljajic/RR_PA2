@@ -1,0 +1,179 @@
+Impact of weather events on population health and economy across the United States from 1950 to 2011
+-------------------------------------------------------------------------------------------------------
+### Synopsis  
+This report aims to answer two questions about weather events and their impact across the US from 1950 to november 2011.  
+Questions are:  
+1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?  
+2. Across the United States, which types of events have the greatest economic consequences?  
+Data that was used for answering these questions were obtained from National Weather Service.  
+
+##  
+### Data Processing  
+
+##  
+Downloading raw data.
+```{r downloading, message=FALSE}
+library(R.utils)
+if (!file.exists("storm_data.csv.bz2")){
+        fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(fileURL, "storm_data.csv.bz2")
+        bunzip2("storm_data.csv.bz2", "storm_data.csv", remove = F, skip = T)
+}
+```
+
+##  
+Loading necessary libraries.
+```{r libs, warning=FALSE, message=FALSE}
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+```
+
+##  
+#### Reading in storm data
+```{r reading, cache=TRUE}
+storm_data <- read.csv("storm_data.csv", stringsAsFactors = F, na.strings = "?")
+```
+
+##  
+Checking properties and content of data frame.
+```{r props}
+str(storm_data)
+```
+
+##  
+Taking a look in variable EVTYPE to see some names and number of different event types and to check if there is any missing values.
+```{r missin}
+head(unique(storm_data$EVTYPE))
+length(unique(storm_data$EVTYPE))
+sum(is.na(storm_data$EVTYPE))
+```
+
+##  
+In the next lines, storm data is processed in order to answer the first question relating to health.  
+Key variables are FATALITIES and INJURIES.
+```{r health processed}
+harmful <- tbl_df(aggregate(cbind(FATALITIES, INJURIES) ~ EVTYPE, storm_data, FUN = "sum"))
+
+# creating new variable that is the sum of FATALITIES and INJURIES
+harmful <- mutate(harmful, FATALITIES_N_INJURIES = FATALITIES + INJURIES)
+
+# data is ordered by the sum of FATALITIES and INJURIES
+harmful <- arrange(harmful, desc(FATALITIES_N_INJURIES))
+```
+
+##  
+Getting the first 10 most harmful events and melting for easier handling.
+```{r melt}
+harmful_melt <- melt(harmful[1:10, c("EVTYPE", "INJURIES", "FATALITIES")], id.vars = 1)
+```
+
+##  
+Key variables for answering second question relating to impact on economy are PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP that corespond to property and crop damage in dollars.  
+According to National Weather Service, PROPDMGEXP and CROPDMGEXP should contain symbols representing weather the cost is in billions, millions or thousands. Let's take a look.
+```{r exps}
+unique(storm_data$PROPDMGEXP)
+unique(storm_data$CROPDMGEXP)
+# those variables need to be cleaned 
+```
+
+##  
+Next lines depict processing of storm data for answering the second question
+```{r process economy_1}
+selected_econ <- storm_data[, c("EVTYPE", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+```
+
+```{r repl}
+multiply <- as.data.frame(cbind(c("H", "K", "M", "B", "h", "k", "m", "b", 0:8, ""), 
+               c(rep(c(100, 1000, 100000, 1000000000), 2), "^"(10, 0:8), NA)))
+
+multiply[, 1] # symbols that should be replaced
+multiply[, 2] # symbols to replace with
+```
+
+##  
+Substituting previously shown symbols with integers
+```{r subs}
+selected_econ <- selected_econ[which(selected_econ$PROPDMGEXP %in% multiply[1:17, 1] |
+                                     selected_econ$CROPDMGEXP %in% multiply[1:17, 1]), ] 
+
+# fatorizing and subtituting 
+selected_econ$PROPDMGEXP <- factor(selected_econ$PROPDMGEXP, 
+                                   levels = multiply[, 1], labels = multiply[, 2])
+selected_econ$CROPDMGEXP <- factor(selected_econ$CROPDMGEXP, 
+                                   levels = multiply[, 1], labels = multiply[, 2])
+```
+
+##  
+Cleaning data
+```{r process economy_2}
+selected_econ <- tbl_df(selected_econ)
+
+# creating new variables Property_damage and Crop_damage that hold real values in dollars
+selected_econ <- mutate(selected_econ, Property_damage = PROPDMG * 
+                                 as.numeric(as.character(PROPDMGEXP)),
+                         Crop_damage = CROPDMG * as.numeric(as.character(CROPDMGEXP)))
+
+economic <- aggregate(cbind(Property_damage, Crop_damage) ~ EVTYPE, selected_econ, FUN = "sum")
+
+# creating new variable Total_damage that is sum of previously created variables
+economic <- mutate(economic, Total_damage = Property_damage + Crop_damage)
+
+#data is arranged by the Total_damage
+economic <- arrange(economic, desc(Total_damage))
+```
+
+##  
+Melting data
+```{r melt_econ}
+economic_melt <- melt(economic[1:10, c("EVTYPE", "Property_damage", "Crop_damage")], 
+                      id.vars = 1)
+```
+
+
+### Results
+
+##  
+Most harmful events with respect to population health - table
+```{r most_harm, results='asis'}
+xt1 <- xtable::xtable(as.data.frame(harmful[1:10, ]))
+print(xt1, type = "html")
+```
+
+## 
+Most harmful events with respect to population health - graph
+```{r harm_plot, fig.width=10}
+events <- harmful$EVTYPE[10:1] # used for arranging axis variables
+gg <- ggplot(data = harmful_melt, aes(x = EVTYPE, y = value, fill = variable))
+gg + scale_x_discrete(limits = events) + geom_bar(stat = "identity") +
+        coord_flip() + scale_fill_manual(values = c("#0000CD", "#FF0000")) +
+        ylab("Number of injuries and fatalities") + xlab("Type of event") +
+        ggtitle("Most harmful events in USA\n with respect to population health") + 
+        theme(legend.title = element_blank(), panel.background = element_rect(fill = "grey"))
+```
+
+
+##  
+Most harmful events with respect to economy - table
+```{r econdmg, results='asis'}
+xt2 <- xtable::xtable(as.data.frame(economic[1:10, ]))
+print(xt2, type = "html")
+```
+
+##  
+Most harmful events with respect to economy - graph
+```{r econ_plot, fig.width=10}
+economic_events <- economic_melt$EVTYPE[10:1] # used for arranging variables on x-axis
+gg2 <- ggplot(data = economic_melt, aes(x = EVTYPE, y = (value/1e+9), fill = variable))
+gg2 + scale_x_discrete(limits = economic_events) + geom_bar(stat = "identity") +
+        coord_flip() + 
+        scale_fill_manual(values = c("red", "green"), breaks = c("Property_damage", "Crop_damage"), 
+        labels = c("PROPERTY DAMAGE", "CROP DAMAGE")) +
+        ylab("Damage in $billion") + xlab("Type of event") +
+        ggtitle("Most harmful events in USA\n with respect to economic damage") + 
+        theme(legend.title = element_blank(), 
+        panel.background = element_rect(fill = "grey"))
+```
+
+##  
+Conserning the first question, tornado surely had the biggest impact on population health causing the most fatalities (cca 5600) and injuries (cca 91300) respectively. However, conserning the second question, flood made the most impact on property damage (around 121 billion dollars) with river floods and ice storms causing greatest damage to crops (around 5 billion dollars each).

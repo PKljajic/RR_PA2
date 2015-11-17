@@ -1,0 +1,15 @@
+base
+methods
+datasets
+utils
+grDevices
+graphics
+stats
+xtable
+knitr
+R.methodsS3
+R.oo
+R.utils
+dplyr
+reshape2
+ggplot2
